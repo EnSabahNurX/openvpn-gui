@@ -1,0 +1,141 @@
+#!/usr/bin/python3
+# -*- coding: UTF-8 -*-
+
+
+import subprocess
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog
+import os
+
+class VPNApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("OpenVPN Manager")
+
+        # Check if credentials are saved
+        self.saved_credentials = self.check_saved_credentials()
+
+        # Username label and entry field
+        self.username_label = tk.Label(self.root, text="Username:")
+        self.username_label.pack()
+        self.username_var = tk.StringVar()
+        self.username_entry = tk.Entry(self.root, width=30, textvariable=self.username_var)
+        self.username_entry.pack(pady=5)
+        self.username_entry.insert(0, "Username" if not self.saved_credentials else "")
+
+        # Password label and entry field
+        self.password_label = tk.Label(self.root, text="Password:")
+        self.password_label.pack()
+        self.password_var = tk.StringVar()
+        self.password_entry = tk.Entry(self.root, width=30, show="*", textvariable=self.password_var)
+        self.password_entry.pack(pady=5)
+        self.password_entry.insert(0, "Password" if not self.saved_credentials else "")
+
+        # Remember credentials checkbox
+        self.remember_credentials = tk.BooleanVar(value=self.saved_credentials)
+        self.remember_checkbutton = tk.Checkbutton(self.root, text="Remember credentials", variable=self.remember_credentials)
+        self.remember_checkbutton.pack(pady=5)
+
+        # Select ovpn file button
+        self.select_file_button = tk.Button(self.root, text="Select ovpn file", command=self.select_ovpn_file)
+        self.select_file_button.pack(pady=10)
+
+        # Connect and Disconnect buttons
+        self.start_button = tk.Button(self.root, text="Connect", command=self.connect_vpn)
+        self.start_button.pack(pady=5)
+
+        self.stop_button = tk.Button(self.root, text="Disconnect", command=self.disconnect_vpn)
+        self.stop_button.pack(pady=5)
+
+        # Load last selected ovpn file path
+        self.last_selected_ovpn_file = self.load_last_selected_ovpn_file()
+
+        # If credentials are saved, fill the username and password fields
+        if self.saved_credentials:
+            self.fill_saved_credentials()
+
+        # Ask for root password at the beginning
+        self.ask_root_password()
+
+        # Run main loop
+        self.root.mainloop()
+
+    def ask_root_password(self):
+        # Prompt for root password
+        password = simpledialog.askstring("Root Password", "Enter your root password:", show="*")
+        # Authenticate and keep the authentication alive for future sudo calls
+        self.sudo_process = subprocess.Popen(['sudo', '-S', 'ls'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = self.sudo_process.communicate(input=password + '\n')
+        if self.sudo_process.returncode != 0:
+            messagebox.showerror("VPN Manager", "Authentication failed. Exiting...")
+            self.root.destroy()
+            return
+
+        # If credentials are saved, fill the username and password fields
+        if self.saved_credentials:
+            self.fill_saved_credentials()
+
+    def select_ovpn_file(self):
+        # Open file dialog to select ovpn file
+        ovpn_file_path = filedialog.askopenfilename(title="Select ovpn file", filetypes=[("OpenVPN Files", "*.ovpn")])
+        if ovpn_file_path:
+            self.last_selected_ovpn_file = ovpn_file_path
+
+    def connect_vpn(self):
+        ovpn_file_path = self.last_selected_ovpn_file
+        if ovpn_file_path:
+            username = self.username_var.get()
+            password = self.password_var.get()
+
+            # Save credentials if user chooses to remember
+            if self.remember_credentials.get():
+                self.save_credentials(username, password)
+                self.save_last_selected_ovpn_file(ovpn_file_path)
+            
+            # Start connection
+            process = subprocess.Popen(['pkexec', 'openvpn', '--daemon', '--config', ovpn_file_path, '--auth-user-pass', '/dev/stdin'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = process.communicate(input=f"{username}\n{password}\n")
+            if process.returncode == 0:
+                messagebox.showinfo("VPN Manager", "VPN Connected Successfully!")
+            else:
+                messagebox.showerror("VPN Manager", f"Failed to connect to VPN.\nError: {stderr}")
+        else:
+            messagebox.showerror("VPN Manager", "Please select an ovpn file.")
+
+    def disconnect_vpn(self):
+        # Stop connection
+        subprocess.run(['pkexec', 'killall', 'openvpn'])
+        messagebox.showinfo("VPN Manager", "VPN Disconnected")
+
+    def check_saved_credentials(self):
+        # Check if credentials file exists
+        return os.path.exists("credentials.txt")
+
+    def fill_saved_credentials(self):
+        # Load saved credentials from file
+        with open("credentials.txt", "r") as file:
+            lines = file.readlines()
+            if len(lines) >= 2:
+                self.username_var.set(lines[0].strip())
+                self.password_var.set(lines[1].strip())
+
+    def save_credentials(self, username, password):
+        # Save credentials to a file
+        with open("credentials.txt", "w") as file:
+            file.write(f"{username}\n{password}")
+
+    def load_last_selected_ovpn_file(self):
+        # Load last selected ovpn file path from file
+        if os.path.exists("last_selected_ovpn_file.txt"):
+            with open("last_selected_ovpn_file.txt", "r") as file:
+                return file.read().strip()
+        else:
+            return ""
+
+    def save_last_selected_ovpn_file(self, ovpn_file_path):
+        # Save last selected ovpn file path to file
+        with open("last_selected_ovpn_file.txt", "w") as file:
+            file.write(ovpn_file_path)
+
+if __name__ == "__main__":
+    app = VPNApp()
